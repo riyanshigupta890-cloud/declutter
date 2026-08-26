@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const MAX_FILE_MB = 10;
 const MAX_SESSION_MB = 50;
@@ -87,7 +88,7 @@ export default function App() {
     const previews = new Map(files.map((f) => [f.name, URL.createObjectURL(f)]));
 
     try {
-      const res = await fetch("/classify", { method: "POST", body: formData });
+      const res = await fetch(`${API_BASE}/classify`, { method: "POST", body: formData });
       if (!res.ok) throw new Error((await res.json()).error || "Upload failed");
       const data = await res.json();
       const withPreviews = data.results.map((r) => ({
