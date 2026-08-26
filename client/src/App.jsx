@@ -8,6 +8,18 @@ const STAMP_DURATION_MS = 550;
 const SWIPE_THRESHOLD_PX = 60;
 const STORAGE_KEY = "declutter-session-v1";
 
+const VIBRATE_PATTERNS = {
+  keep: 15,
+  archive: 15,
+  skip: 10,
+  delete: [15, 40, 15],
+};
+
+function vibrate(action) {
+  if (typeof navigator === "undefined" || !navigator.vibrate) return;
+  navigator.vibrate(VIBRATE_PATTERNS[action] || 15);
+}
+
 function loadSession() {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
@@ -30,6 +42,9 @@ export default function App() {
   const [error, setError] = useState(null);
   const [stamp, setStamp] = useState(null); // "keep" | "archive" | "delete" | "skip" | null
   const [dragOver, setDragOver] = useState(false);
+  const [viewMode, setViewMode] = useState(restored?.viewMode || "single"); // "single" | "list"
+  const [listFilter, setListFilter] = useState("all"); // all | keep | archive | delete | skip | undecided
+  const [listSort, setListSort] = useState("filename"); // filename | confidence | category
   const fileInputRef = useRef(null);
   const touchStartRef = useRef(null);
 
@@ -44,9 +59,10 @@ export default function App() {
       items: items.map(({ preview, ...rest }) => rest),
       index,
       status,
+      viewMode,
     };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
-  }, [items, index, status]);
+  }, [items, index, status, viewMode]);
 
   async function handleFiles(fileList) {
     setError(null);
@@ -90,10 +106,24 @@ export default function App() {
 
   function decide(action) {
     if (stamp) return; // ignore repeat clicks/swipes mid-animation
+    vibrate(action);
     setStamp(action);
     setItems((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], decision: action };
+      return next;
+    });
+  }
+
+  // Direct decision from list view — no stamp animation, no card advance.
+  function setItemDecision(itemIndex, action) {
+    vibrate(action);
+    setItems((prev) => {
+      const next = [...prev];
+      next[itemIndex] = {
+        ...next[itemIndex],
+        decision: next[itemIndex].decision === action ? null : action,
+      };
       return next;
     });
   }
@@ -145,7 +175,7 @@ export default function App() {
   // Keyboard shortcuts: K = keep, A = archive, D = delete, S = skip
   useEffect(() => {
     function onKeyDown(e) {
-      if (status !== "reviewing") return;
+      if (status !== "reviewing" || viewMode !== "single") return;
       const key = e.key.toLowerCase();
       if (key === "k") decide("keep");
       if (key === "a") decide("archive");
@@ -193,6 +223,7 @@ export default function App() {
     setStatus("idle");
     setError(null);
     setStamp(null);
+    setViewMode("single");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -260,6 +291,21 @@ export default function App() {
     (i) => i.duplicateType === "exact" && i.decision === null
   ).length;
 
+  // Items for list view — filtered and sorted, original index preserved
+  // so decisions map back to the right entry in `items`.
+  const listItems = items
+    .map((item, i) => ({ ...item, _idx: i }))
+    .filter((item) => {
+      if (listFilter === "all") return true;
+      if (listFilter === "undecided") return item.decision === null;
+      return item.decision === listFilter;
+    })
+    .sort((a, b) => {
+      if (listSort === "confidence") return (b.confidence || 0) - (a.confidence || 0);
+      if (listSort === "category") return (a.category || "").localeCompare(b.category || "");
+      return (a.filename || "").localeCompare(b.filename || "");
+    });
+
   return (
     <div className="page">
       <header className="header">
@@ -308,6 +354,23 @@ export default function App() {
       )}
 
       {status === "reviewing" && current && (
+        <div className="view-toggle">
+          <button
+            className={`view-toggle-btn${viewMode === "single" ? " active" : ""}`}
+            onClick={() => setViewMode("single")}
+          >
+            Card view
+          </button>
+          <button
+            className={`view-toggle-btn${viewMode === "list" ? " active" : ""}`}
+            onClick={() => setViewMode("list")}
+          >
+            List view
+          </button>
+        </div>
+      )}
+
+      {status === "reviewing" && current && viewMode === "single" && (
         <div
           className={`card${stamp ? " stamping" : ""}`}
           onTouchStart={onCardTouchStart}
@@ -401,6 +464,113 @@ export default function App() {
               ← undo last decision
             </button>
           )}
+        </div>
+      )}
+
+      {status === "reviewing" && viewMode === "list" && (
+        <div className="card list-card">
+          <div className="list-controls">
+            <select
+              className="list-select"
+              value={listFilter}
+              onChange={(e) => setListFilter(e.target.value)}
+            >
+              <option value="all">All ({items.length})</option>
+              <option value="undecided">Undecided</option>
+              <option value="keep">Kept</option>
+              <option value="archive">Archived</option>
+              <option value="delete">Deleted</option>
+              <option value="skip">Skipped</option>
+            </select>
+            <select
+              className="list-select"
+              value={listSort}
+              onChange={(e) => setListSort(e.target.value)}
+            >
+              <option value="filename">Sort: filename</option>
+              <option value="confidence">Sort: confidence</option>
+              <option value="category">Sort: category</option>
+            </select>
+          </div>
+
+          {exactDuplicateCount > 0 && (
+            <div className="bulk-bar">
+              <span>
+                {exactDuplicateCount} exact duplicate
+                {exactDuplicateCount > 1 ? "s" : ""} in this batch
+              </span>
+              <button className="bulk-bar-btn" onClick={bulkDeleteExactDuplicates}>
+                Auto-delete all
+              </button>
+            </div>
+          )}
+
+          {listItems.length === 0 && (
+            <p className="hint">No files match this filter.</p>
+          )}
+
+          <div className="list-rows">
+            {listItems.map((item) => (
+              <div className="list-row" key={item._idx}>
+                <button
+                  className="list-row-thumb-btn"
+                  onClick={() => {
+                    setIndex(item._idx);
+                    setViewMode("single");
+                  }}
+                  title="Open in card view"
+                >
+                  {item.preview ? (
+                    <img
+                      src={item.preview}
+                      alt={item.filename}
+                      className="list-row-thumb"
+                    />
+                  ) : (
+                    <span className="list-row-thumb list-row-thumb-empty" />
+                  )}
+                </button>
+                <div className="list-row-info">
+                  <p className="list-row-filename">{item.filename}</p>
+                  <p className="list-row-meta">
+                    {item.category || "—"} · {Math.round((item.confidence || 0) * 100)}%
+                    {item.duplicateType === "exact" && " · exact dup"}
+                    {item.duplicateType === "near" && " · near dup"}
+                  </p>
+                </div>
+                <div className="list-row-actions">
+                  <button
+                    className={`list-action-btn action-keep${item.decision === "keep" ? " active" : ""}`}
+                    onClick={() => setItemDecision(item._idx, "keep")}
+                  >
+                    K
+                  </button>
+                  <button
+                    className={`list-action-btn action-archive${item.decision === "archive" ? " active" : ""}`}
+                    onClick={() => setItemDecision(item._idx, "archive")}
+                  >
+                    A
+                  </button>
+                  <button
+                    className={`list-action-btn action-delete${item.decision === "delete" ? " active" : ""}`}
+                    onClick={() => setItemDecision(item._idx, "delete")}
+                  >
+                    D
+                  </button>
+                  <button
+                    className={`list-action-btn action-skip${item.decision === "skip" ? " active" : ""}`}
+                    onClick={() => setItemDecision(item._idx, "skip")}
+                  >
+                    S
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button className="reset-btn list-finish-btn" onClick={() => setStatus("done")}>
+            Finish → view report
+          </button>
         </div>
       )}
 

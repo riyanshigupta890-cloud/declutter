@@ -14,6 +14,25 @@ anything actually happens to your files.
 Unlike existing duplicate-cleaner apps, Declutter tells you **why** it thinks
 something is safe to let go, not just that it looks similar to another file.
 
+## Features
+
+- **Two review modes** — one-at-a-time card view with keyboard shortcuts
+  (K/A/D/S) and swipe gestures on mobile, or a filterable/sortable list view
+  for triaging a whole batch at once
+- **Skip** — punt on anything you're unsure about instead of forcing a
+  decision
+- **Undo** — step back and revert your last decision
+- **Drag-and-drop or click-to-upload**
+- **Exact-duplicate bulk action** — auto-delete every exact duplicate in one
+  tap instead of reviewing each individually
+- **Session recovery** — refresh mid-review and pick up exactly where you
+  left off (image previews reset, but your progress and decisions don't)
+- **Confirm before discarding** — "Start over" asks first if you still have
+  unreviewed files
+- **PDF report export** — a summary + full per-file table you can download
+  and keep
+- **Haptic feedback on mobile** for each decision
+
 ## Why it's different
 
 - **Reasoning, not just labels.** Every file gets a one-line explanation, not
@@ -31,14 +50,14 @@ something is safe to let go, not just that it looks similar to another file.
 ## Tech stack
 
 - `client/` — React (Vite)
-- `server/` — Express + Anthropic API (vision-capable classification)
+- `server/` — Express + Google Gemini API (vision-capable classification)
 
 ## Local setup
 
 ```bash
 # server
 cd server
-cp .env.example .env   # add your ANTHROPIC_API_KEY
+cp .env.example .env   # add your GEMINI_API_KEY
 npm install
 npm run dev             # http://localhost:3001
 
@@ -53,6 +72,9 @@ npm run dev              # http://localhost:5173
 - 10MB per file, ~50MB per session
 - No account/login — single-session use
 - Exact-duplicate detection via file hash; AI classification via vision LLM
+- Gemini free-tier quota is limited (20 requests/day on the free tier as of
+  this build) — classification will fail with a 429 once exhausted until it
+  resets
 
 ## AI tools disclosed
 
